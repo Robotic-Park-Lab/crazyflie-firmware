@@ -5,6 +5,7 @@
 #include "attitude_controller.h"
 #include "sensfusion6.h"
 #include "position_controller.h"
+#include "position_eventbased_controller.h"
 #include "controller_pid.h"
 
 #include "log.h"
@@ -14,6 +15,7 @@
 #define ATTITUDE_UPDATE_DT    (float)(1.0f/ATTITUDE_RATE)
 
 static bool tiltCompensationEnabled = false;
+static bool eventBasedController = false;
 
 static attitude_t attitudeDesired;
 static attitude_t rateDesired;
@@ -32,6 +34,7 @@ void controllerPidInit(void)
 {
   attitudeControllerInit(ATTITUDE_UPDATE_DT);
   positionControllerInit();
+  positionEBControllerInit();
 }
 
 bool controllerPidTest(void)
@@ -66,7 +69,7 @@ void controllerPid(control_t *control, setpoint_t *setpoint,
     // Rate-controled YAW is moving YAW angle setpoint
     if (setpoint->mode.yaw == modeVelocity) {
       attitudeDesired.yaw = capAngle(attitudeDesired.yaw + setpoint->attitudeRate.yaw * ATTITUDE_UPDATE_DT);
-       
+
       #ifdef YAW_MAX_DELTA
       float delta = capAngle(attitudeDesired.yaw-state->attitude.yaw);
       // keep the yaw setpoint within +/- YAW_MAX_DELTA from the current yaw
@@ -87,7 +90,11 @@ void controllerPid(control_t *control, setpoint_t *setpoint,
   }
 
   if (RATE_DO_EXECUTE(POSITION_RATE, tick)) {
-    positionController(&actuatorThrust, &attitudeDesired, setpoint, state);
+    if (!eventBasedController){
+      positionEBController(&actuatorThrust, &attitudeDesired, setpoint, state);
+    }else{
+      positionController(&actuatorThrust, &attitudeDesired, setpoint, state);
+    }
   }
 
   if (RATE_DO_EXECUTE(ATTITUDE_RATE, tick)) {
@@ -241,4 +248,8 @@ PARAM_GROUP_START(controller)
  * @brief Nonzero for tilt compensation enabled (default: 0)
  */
 PARAM_ADD(PARAM_UINT8, tiltComp, &tiltCompensationEnabled)
+/**
+ * @brief PID type (Continuous/default: 0; Event Based: 1)
+ */
+PARAM_ADD(PARAM_UINT8, eventBased, &eventBasedController)
 PARAM_GROUP_STOP(controller)
