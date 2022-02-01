@@ -172,7 +172,7 @@ static struct this_s this = {
     .pid.dt = DT,
     .co = 0.01f,
     .ai = 0.01f,
-    .count = 1.0f,
+    .count = 1,
     .last_hold = 0.0f,
   },
   #ifdef IMPROVED_BARO_Z_HOLD
@@ -244,14 +244,14 @@ void positionEBController(float* thrust, attitude_t *attitude, setpoint_t *setpo
   } else if (!setpoint->velocity_body) {
     setpoint->velocity.y = globalvy * cosyaw - globalvx * sinyaw;
   }
-  if (setpoint->mode.z == modeAbs && this.pidZ.last_hold == 0.0f) {
+  if (setpoint->mode.z == modeAbs) {
     float error = this.pidZ.last_hold - (setpoint->position.z - state->position.z);
-    if (fabsf(error) > this.pidZ.co){
+    if (fabsf(error) > this.pidZ.co || this.pidZ.count > 10){
       setpoint->velocity.z = runPid(state->position.z, &this.pidZ, setpoint->position.z, this.pidZ.count * DT);
-      this.pidZ.count = 1.0;
-      this.pidZ.last_hold = error;
+      this.pidZ.count = 1;
+      this.pidZ.last_hold = setpoint->position.z - state->position.z;
     }else{
-      this.pidZ.count += 1.0;
+      this.pidZ.count += 1;
     }
     // setpoint->velocity.z = runPid(state->position.z, &this.pidZ, setpoint->position.z, DT);
   }
@@ -404,7 +404,11 @@ LOG_ADD(LOG_FLOAT, Zd, &this.pidZ.pid.outD)
 /**
  * @brief Z count
  */
-LOG_ADD(LOG_FLOAT, Zcount, &this.pidZ.count)
+LOG_ADD(LOG_UINT16, Zcount, &this.pidZ.count)
+/**
+ * @brief PID derivative output position z
+ */
+LOG_ADD(LOG_FLOAT, Zlasthold, &this.pidZ.last_hold)
 
 /**
  * @brief PID proportional output velocity x
