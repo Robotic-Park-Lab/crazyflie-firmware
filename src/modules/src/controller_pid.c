@@ -90,7 +90,7 @@ void controllerPid(control_t *control, setpoint_t *setpoint,
   }
 
   if (RATE_DO_EXECUTE(POSITION_RATE, tick)) {
-    if (!eventBasedController){
+    if (eventBasedController){
       positionEBController(&actuatorThrust, &attitudeDesired, setpoint, state);
     }else{
       positionController(&actuatorThrust, &attitudeDesired, setpoint, state);
