@@ -152,6 +152,7 @@ static struct this_s this = {
     .pid.dt = DT,
     .co = 0.01f,
     .ai = 0.01f,
+    .count = 1,
   },
 
   .pidY = {
@@ -163,6 +164,7 @@ static struct this_s this = {
     .pid.dt = DT,
     .co = 0.01f,
     .ai = 0.01f,
+    .count = 1,
   },
 
   .pidZ = {
@@ -239,14 +241,32 @@ void positionEBController(float* thrust, attitude_t *attitude, setpoint_t *setpo
 
   //X, Y
   if (setpoint->mode.x == modeAbs) {
-    setpoint->velocity.x = runPid(state_body_x, &this.pidX, setp_body_x, DT);
+    this.pidX.error = this.pidX.last_hold - (setp_body_x - state_body_x);
+    if (fabsf(this.pidX.error) > this.pidX.co){
+      setpoint->velocity.x = runPid(state_body_x, &this.pidX, setp_body_x, this.pidX.count * DT);
+      this.pidX.count = 1;
+      this.pidX.last_hold = setp_body_x - state_body_x;
+      this.pidX.signal = setpoint->velocity.x;
+    }else{
+      this.pidX.count += 1;
+    }
   } else if (!setpoint->velocity_body) {
     setpoint->velocity.x = globalvx * cosyaw + globalvy * sinyaw;
+    this.pidX.signal = setpoint->velocity.x;
   }
   if (setpoint->mode.y == modeAbs) {
-    setpoint->velocity.y = runPid(state_body_y, &this.pidY, setp_body_y, DT);
+    this.pidY.error = this.pidY.last_hold - (setp_body_y - state_body_y);
+    if (fabsf(this.pidY.error) > this.pidY.co){
+      setpoint->velocity.y = runPid(state_body_y, &this.pidY, setp_body_y, this.pidX.count * DT);
+      this.pidY.count = 1;
+      this.pidY.last_hold = setpoint->position.z - state->position.z;
+      this.pidY.signal = setpoint->velocity.y;
+    }else{
+      this.pidY.count += 1;
+    }
   } else if (!setpoint->velocity_body) {
     setpoint->velocity.y = globalvy * cosyaw - globalvx * sinyaw;
+    this.pidY.signal = setpoint->velocity.y;
   }
   if (setpoint->mode.z == modeAbs) {
     this.pidZ.error = this.pidZ.last_hold - (setpoint->position.z - state->position.z);
@@ -278,15 +298,14 @@ void velocityEBController(float* thrust, attitude_t *attitude, setpoint_t *setpo
   state_body_vy = -state->velocity.x * sinyaw + state->velocity.y * cosyaw;
 
   // Roll and Pitch
-  attitude->pitch = -runPid(state_body_vx, &this.pidVX, setpoint->velocity.x, DT) - kFFx*setpoint->velocity.x;
-  attitude->roll = -runPid(state_body_vy, &this.pidVY, setpoint->velocity.y, DT) - kFFy*setpoint->velocity.y;
+  attitude->pitch = -runPid(state_body_vx, &this.pidVX, this.pidX.signal, DT) - kFFx*setpoint->velocity.x;
+  attitude->roll = -runPid(state_body_vy, &this.pidVY, this.pidY.signal, DT) - kFFy*setpoint->velocity.y;
 
   attitude->roll  = constrain(attitude->roll,  -rLimit, rLimit);
   attitude->pitch = constrain(attitude->pitch, -pLimit, pLimit);
 
   // Thrust
   float thrustRaw = runPid(state->velocity.z, &this.pidVZ, this.pidZ.signal, DT);
-  this.pidVZ.signal = thrustRaw;
   // Scale the thrust and add feed forward term
   *thrust = thrustRaw*thrustScale + this.thrustBase;
   // Check for minimum thrust
@@ -384,6 +403,23 @@ LOG_ADD(LOG_FLOAT, bodyY, &state_body_y)
 /**
  * @brief PID proportional output position y
  */
+LOG_ADD(LOG_FLOAT, Xp, &this.pidX.pid.outP)
+/**
+ * @brief PID integral output position y
+ */
+LOG_ADD(LOG_FLOAT, Xi, &this.pidX.pid.outI)
+/**
+ * @brief PID derivative output position y
+ */
+LOG_ADD(LOG_FLOAT, Xd, &this.pidX.pid.outD)
+/**
+ * @brief Y count
+ */
+LOG_ADD(LOG_UINT16, Xcount, &this.pidX.count)
+
+/**
+ * @brief PID proportional output position y
+ */
 LOG_ADD(LOG_FLOAT, Yp, &this.pidY.pid.outP)
 /**
  * @brief PID integral output position y
@@ -393,7 +429,10 @@ LOG_ADD(LOG_FLOAT, Yi, &this.pidY.pid.outI)
  * @brief PID derivative output position y
  */
 LOG_ADD(LOG_FLOAT, Yd, &this.pidY.pid.outD)
-
+/**
+ * @brief Y count
+ */
+LOG_ADD(LOG_UINT16, Ycount, &this.pidY.count)
 /**
  * @brief PID proportional output position z
  */
@@ -410,23 +449,6 @@ LOG_ADD(LOG_FLOAT, Zd, &this.pidZ.pid.outD)
  * @brief Z count
  */
 LOG_ADD(LOG_UINT16, Zcount, &this.pidZ.count)
-/**
- * @brief PID derivative output position z
- */
-LOG_ADD(LOG_FLOAT, Zlasthold, &this.pidZ.last_hold)
-/**
- * @brief PID derivative output position z
- */
-LOG_ADD(LOG_FLOAT, Zeberror, &this.pidZ.error)
-/**
- * @brief PID derivative output position z
- */
-LOG_ADD(LOG_FLOAT, Zebsignal, &this.pidZ.signal)
-/**
- * @brief PID derivative output position z
- */
-LOG_ADD(LOG_FLOAT, Zebtest, &this.pidVZ.signal)
-
 
 /**
  * @brief PID proportional output velocity x
