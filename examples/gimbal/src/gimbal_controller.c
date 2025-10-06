@@ -690,7 +690,6 @@ void controllerOutOfTree(control_t *control, const setpoint_t* setpoint, const s
       }else{
         control->roll = rroll_cmd;
       }
-
       if(eval_threshold(&pitch_rate_threshold, -sensors->gyro.y, rateDesired.pitch)){
         pidSetDesired(&pidPitchRate_rp, rateDesired.pitch);
         pidPitchRate_rp.dt = 0.002f * pitch_rate_threshold.count;
