@@ -9,15 +9,14 @@ subsystems. In the context of this documentation, the term `CRTP` is used both
 to describe the packet protocol and its format as well as the collection of
 data packets that are used to communicate with the Crazyflie.
 
-Unless otherwise noted, this protocol documentation covers `Crazyflie 2.x`, the
-`Crazyflie Bolt` and the `Roadrunner`.
+Unless otherwise noted, this protocol documentation covers `Crazyflie 2.x` (including `Crazyflie Bolt`) and the `Roadrunner`.
 
 ## Protocol version and stability guarantee
 
 In order to allow for improvement and breaking change the protocol is versioned.
 The version is available using the [getProtocolVersion](crtp_platform#get-protocol-version) packet.
 
-The version is currently 5.
+The current version is defined in the constant `CRTP_PROTOCOL_VERSION`.
 
 When removing functionality from the protocol, packet will be deprecated for at least one version before being removed.
 Deprecated functionality prints a Warning in the [console](crtp_console). This rule allows for the Crazyflie firmware
@@ -35,7 +34,7 @@ The Crayzyflie communication is implemented as a stack of independent layers:
     +       CRTP        +   <- (port, channel, payload)
     +-------------------+
     +       Link        +   <- Radio link or USB link
-    +-------------------+   
+    +-------------------+
     +  Physical medium  +   <- radio or USB
     +-------------------+
 
@@ -58,7 +57,7 @@ The Crayzyflie communication is implemented as a stack of independent layers:
 There is currently two actively supported link implementation. They are
 documented on their own thread:
  - The radio link implements CRTP link over nRF24 compatible radios
- - The USB link implements CRTP link over USB to the Crazylfie 2.x USB port 
+ - The USB link implements CRTP link over USB to the Crazylfie 2.x USB port
 
 ### Packet ordering and real-time support
 
@@ -81,7 +80,7 @@ Each CRTP packets carries one *port* number, a *channel* number as well as a
 Payload:
  - The `port` range between 0 and 15 (4 bits)
  - The `channel` ranges between 0 and 3 (2 bits)
- - The payload is a data buffer of up to 31 bytes
+ - The payload is a data buffer of up to 30 bytes
 
 The couple `port`:`channel` can be written separated by a color in this documentation.
 
@@ -97,7 +96,7 @@ be sent.
 The NULL packet has been extensively used by links to implement side-channel
 packets that are communicated outside the CRTP data flows. For example this is
 used to implement bootloader packets that should be interpreted by the
-Crazyflie's nRF51 radio chip without being passed to the STM32 application 
+Crazyflie's nRF51 radio chip without being passed to the STM32 application
 processor.
 
 ## Port allocation
@@ -115,16 +114,21 @@ its handling on the ground.
 |  5       | [Data logging](crtp_log.md)                  | Set up log blocks with variables that will be sent back to the Crazyflie at a specified period. Log variables are defined using a [macro in the Crazyflie source-code](/docs/userguides/logparam.md)
 |  6       | [Localization](crtp_localization.md)         | Packets related to localization|
 |  7       | [Generic Setpoint](crtp_generic_setpoint.md) | Generic instantaneous setpoints (ie. position control and more) |
+|  9       | [Supervisor](crtp_supervisor.md)             | Supervisor commands (arm, emergency stop) and state queries |
 |  13      | [Platform](crtp_platform.md)                 | Used for misc platform control, like debugging and power off |
 |  14      | Client-side debugging                        | Debugging the UI and exists only in the Crazyflie Python API and not in the Crazyflie itself.|
 |  15      | [Link layer](crtp_link.md)                   | Low level link-related service. For example *echo* to ping the Crazyflie |
+
+## Error numbers
+
+Many CRTP response packets include a result byte. A value of `0` means success; non-zero values are standard C errno codes. See [Error numbers](crtp_error_numbers.md) for the full table.
 
 Connection procedure
 --------------------
 
 Generaly speaking CRTP is connection-less and most of the subsystem in the
 Crazyflie will strive to be stateless. This is not true for all the subsystem or
-links though: 
+links though:
  - The USB link needs to be enabled in the Crazyflie using a USB control packet
  - The Radio link maintains two packet counters to ensure that there are no packet
    loss and strict packet ordering. This is called Safelink and needs to be

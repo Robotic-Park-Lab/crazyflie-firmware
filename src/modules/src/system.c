@@ -40,7 +40,6 @@
 #include "ledseq.h"
 #include "pm.h"
 
-#include "config.h"
 #include "system.h"
 #include "platform.h"
 #include "storage.h"
@@ -57,6 +56,7 @@
 #include "usblink.h"
 #include "mem.h"
 #include "crtp_mem.h"
+#include "crtp_supervisor.h"
 #include "proximity.h"
 #include "watchdog.h"
 #include "queuemonitor.h"
@@ -78,21 +78,14 @@
   #include "cpxlink.h"
 #endif
 
-#ifndef CONFIG_MOTORS_START_DISARMED
-#define ARM_INIT true
-#else
-#define ARM_INIT false
-#endif
-
 /* Private variable */
 static bool selftestPassed;
-static bool armed = ARM_INIT;
-static bool forceArm;
 static uint8_t dumpAssertInfo = 0;
 static bool isInit;
 
 static char nrf_version[16];
 static uint8_t testLogParam;
+static uint8_t doAssert;
 
 STATIC_MEM_TASK_ALLOC(systemTask, SYSTEM_TASK_STACKSIZE);
 
@@ -128,6 +121,7 @@ void systemInit(void)
   debugInit();
   crtpInit();
   consoleInit();
+  crtpSupervisorInit();
 
   DEBUG_PRINT("----------------------------\n");
   DEBUG_PRINT("%s is up and running!\n", platformConfigGetDeviceTypeName());
@@ -333,9 +327,13 @@ void systemTask(void *arg)
   }
   DEBUG_PRINT("Free heap: %d bytes\n", xPortGetFreeHeapSize());
 
-  workerLoop();
+  // Notify the nRF51 that we are ready to receive radio packets
+  // This is done after systemStart() to ensure all services
+  // are ready to process packets, not just queue them.
+  // Note: If this is never reached (e.g., self-test failure),
+  // the nRF51 will timeout and enable radio anyway for debugging.
+  systemSendRadioReady();
 
-  //Should never reach this point!
   while(1)
     vTaskDelay(portMAX_DELAY);
 }
@@ -345,7 +343,7 @@ void systemTask(void *arg)
 void systemStart()
 {
   xSemaphoreGive(canStartMutex);
-#ifndef DEBUG
+#ifndef CONFIG_DEBUG
   watchdogInit();
 #endif
 }
@@ -361,17 +359,6 @@ void systemWaitStart(void)
   xSemaphoreGive(canStartMutex);
 }
 
-void systemSetArmed(bool val)
-{
-  armed = val;
-}
-
-bool systemIsArmed()
-{
-
-  return armed || forceArm;
-}
-
 void systemRequestShutdown()
 {
   SyslinkPacket slp;
@@ -381,11 +368,29 @@ void systemRequestShutdown()
   syslinkSendPacket(&slp);
 }
 
+void systemRequestShutdownSTM()
+{
+  SyslinkPacket slp;
+
+  slp.type = SYSLINK_PM_ONOFF_STM_OFF;
+  slp.length = 0;
+  syslinkSendPacket(&slp);
+}
+
 void systemRequestNRFVersion()
 {
   SyslinkPacket slp;
 
   slp.type = SYSLINK_SYS_NRF_VERSION;
+  slp.length = 0;
+  syslinkSendPacket(&slp);
+}
+
+void systemSendRadioReady()
+{
+  SyslinkPacket slp;
+
+  slp.type = SYSLINK_RADIO_READY;
   slp.length = 0;
   syslinkSendPacket(&slp);
 }
@@ -428,6 +433,12 @@ void vApplicationIdleHook( void )
 #endif
 }
 
+static void doAssertCallback(void) {
+  if (doAssert) {
+    ASSERT_FAILED();
+  }
+}
+
 /**
  * This parameter group contain read-only parameters pertaining to the CPU
  * in the Crazyflie.
@@ -466,11 +477,6 @@ PARAM_GROUP_START(system)
 PARAM_ADD_CORE(PARAM_INT8 | PARAM_RONLY, selftestPassed, &selftestPassed)
 
 /**
- * @brief Set to nonzero to force system to be armed
- */
-PARAM_ADD(PARAM_INT8 | PARAM_PERSISTENT, forceArm, &forceArm)
-
-/**
  * @brief Set to nonzero to trigger dump of assert information to the log.
  */
 PARAM_ADD(PARAM_UINT8, assertInfo, &dumpAssertInfo)
@@ -481,17 +487,19 @@ PARAM_ADD(PARAM_UINT8, assertInfo, &dumpAssertInfo)
  */
 PARAM_ADD(PARAM_UINT8, testLogParam, &testLogParam)
 
+/**
+ * @brief Set to non-zero to trigger a failed assert, useful for debugging
+ *
+ */
+PARAM_ADD_WITH_CALLBACK(PARAM_UINT8, doAssert, &doAssert, doAssertCallback)
+
+
 PARAM_GROUP_STOP(system)
 
 /**
  *  System loggable variables to check different system states.
  */
 LOG_GROUP_START(sys)
-/**
- * @brief If zero, arming system is preventing motors to start
- */
-LOG_ADD(LOG_INT8, armed, &armed)
-
 /**
  * @brief Test util for log and param. The value is set through the system.testLogParam parameter
  */

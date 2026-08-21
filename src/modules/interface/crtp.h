@@ -30,6 +30,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define CRTP_PROTOCOL_VERSION 12
+
 #define CRTP_MAX_DATA_SIZE 30
 
 #define CRTP_HEADER(port, channel) (((port & 0x0F) << 4) | (channel & 0x0F))
@@ -45,6 +47,7 @@ typedef enum {
   CRTP_PORT_LOCALIZATION     = 0x06,
   CRTP_PORT_SETPOINT_GENERIC = 0x07,
   CRTP_PORT_SETPOINT_HL      = 0x08,
+  CRTP_PORT_SUPERVISOR       = 0x09,
   CRTP_PORT_PLATFORM         = 0x0D,
   CRTP_PORT_LINK             = 0x0F,
 } CRTPPort;
@@ -150,7 +153,7 @@ int crtpGetFreeTxQueuePackets(void);
  * Wait for a packet to arrive for the specified taskID
  *
  * @param[in]  taskId The id of the CRTP task
- * @paran[out] p      The CRTP Packet with information
+ * @param[out] p      The CRTP Packet with information
  *
  * @return status of fetch from queue
  */

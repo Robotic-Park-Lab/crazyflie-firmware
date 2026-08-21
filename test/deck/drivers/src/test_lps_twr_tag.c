@@ -1,3 +1,5 @@
+// @IGNORE_IF_NOT CONFIG_DECK_LOCO
+
 // File under test lpsTwrTag.h
 #include "lpsTwrTag.h"
 
@@ -22,6 +24,10 @@ void arm_mean_f32(const float32_t * pSrc, uint32_t blockSize, float32_t * pResul
 #include "mock_estimator.h"
 
 #include "freertosMocks.h"
+
+// locoEnableEstimator is a global defined in locodeck.c, but that module is
+// mocked here. CMock only mocks functions, so provide the variable manually.
+uint8_t locoEnableEstimator = 1;
 
 static dwDevice_t dev;
 static lpsTwrAlgoOptions_t options;

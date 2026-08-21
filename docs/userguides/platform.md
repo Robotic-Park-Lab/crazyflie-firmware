@@ -33,6 +33,19 @@ And this is the rule of thumb. If it is about a configuration, such as PID tunin
 be a persistent parameter. If it is a functionality it should be a compile time KBuild define. It is not a sharp cut, 
 do what is best and easiest for the user.
 
+## Onboard LEDs
+
+The onboard LEDs are named in firmware by color and side rather than by their physical numbering on the board. This means the logical LED names and the physical LED labels are not in the same order.
+
+| Physical LED | Firmware names | Bitmask bits |
+|--------------|-----------------|--------------|
+| 1 | `GREEN_R`, `RED_R` | 3, 4 |
+| 2 | `BLUE_NRF` | 5 |
+| 3 | `BLUE_L` | 0 |
+| 4 | `GREEN_L`, `RED_L` | 1, 2 |
+
+The LED bitmask parameter follows the firmware ordering defined in `src/drivers/interface/led.h` and `src/drivers/src/led.c`.
+
 ## Default values
 
 There is functionality to set default values for variables based on the platform and this is for instance used to set
@@ -50,7 +63,8 @@ An identifier is stored in the physical hardware of each device, which is ued to
 |----------|---------------------------------------------|
 | Platform | Supported hardware (device type)            |
 |----------|---------------------------------------------|
-| cf2      | Crazyflie 2.0 (CF20), Crazyflie 2.1 (CF21) |
+| cf2      | Crazyflie 2.0 (CF20), Crazyflie 2.1 (CF21)  |
+| cf21bl   | Crazyflie 2.1 Brushless (C21B)              |
 | bolt     | Crazyflie Bolt 1.0 (CB10)                   |
 | tag      | Roadrunner 1.0 (RR10)                       |
 |----------|---------------------------------------------|

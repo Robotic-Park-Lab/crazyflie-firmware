@@ -1,6 +1,6 @@
 /*
- *    ||          ____  _ __                           
- * +------+      / __ )(_) /_______________ _____  ___ 
+ *    ||          ____  _ __
+ * +------+      / __ )(_) /_______________ _____  ___
  * | 0xBC |     / __  / / __/ ___/ ___/ __ `/_  / / _ \
  * +------+    / /_/ / / /_/ /__/ /  / /_/ / / /_/  __/
  *  ||  ||    /_____/_/\__/\___/_/   \__,_/ /___/\___/
@@ -30,19 +30,84 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/**
+ * @brief Initialize the system module.
+ * 
+ * Performs all necessary initialization for the system module,
+ * setting up required hardware and software resources.
+ */
 void systemInit(void);
+
+/**
+ * @brief Test the system module.
+ * 
+ * Runs self-tests on the system module to verify correct initialization
+ * and functionality.
+ * 
+ * @return true if the system test passes, false otherwise.
+ */
 bool systemTest(void);
 
+/**
+ * @brief Launch the system.
+ * 
+ * Triggers the system launch sequence, transitioning the system
+ * from an initialized state to an operational state.
+ */
 void systemLaunch(void);
 
-
+/**
+ * @brief Start the system.
+ * 
+ * Starts the system's main operation, enabling all active modules
+ * and tasks.
+ */
 void systemStart();
-void systemWaitStart(void);
-void systemSetArmed(bool val);
-bool systemIsArmed();
 
+/**
+ * @brief Wait for the system to start.
+ * 
+ * Blocks the calling task until the system has fully started
+ * and is ready for operation.
+ */
+void systemWaitStart(void);
+
+/**
+ * @brief Request a system shutdown.
+ * 
+ * Initiates a shutdown of the entire system.
+ */
 void systemRequestShutdown();
+
+/**
+ * @brief Request a shutdown of the STM32 microcontroller.
+ * 
+ * Initiates a shutdown of STM32 and decks (VCC & VCOM).
+ */
+void systemRequestShutdownSTM();
+
+/**
+ * @brief Request the NRF firmware version.
+ * 
+ * Sends a request to the NRF processor to retrieve its
+ * current firmware version information.
+ */
 void systemRequestNRFVersion();
+
+/**
+ * @brief Send a radio ready notification.
+ * 
+ * Notifies the system (and the NRF processor via syslink) that
+ * the radio subsystem is initialized and ready for communication.
+ */
+void systemSendRadioReady();
+
+/**
+ * @brief Handle incoming syslink messages.
+ * 
+ * Processes received syslink packets from the NRF processor,
+ * dispatching them to the appropriate system handlers.
+ */
 void systemSyslinkReceive();
 
 #endif //__SYSTEM_H__
