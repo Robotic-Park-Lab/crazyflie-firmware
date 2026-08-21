@@ -58,8 +58,6 @@
 #include "rateSupervisor.h"
 
 static bool isInit;
-static bool emergencyStop = false;
-static int emergencyStopTimeout = EMERGENCY_STOP_TIMEOUT_DISABLED;
 
 static uint32_t inToOutLatency;
 
@@ -82,6 +80,7 @@ static ControllerType controllerType;
 static STATS_CNT_RATE_DEFINE(stabilizerRate, 500);
 static rateSupervisor_t rateSupervisorContext;
 static bool rateWarningDisplayed = false;
+SemaphoreHandle_t xRateSupervisorSemaphore;
 
 static struct {
   // position - mm
@@ -120,8 +119,10 @@ static struct {
 } setpointCompressed;
 
 STATIC_MEM_TASK_ALLOC(stabilizerTask, STABILIZER_TASK_STACKSIZE);
+STATIC_MEM_TASK_ALLOC(rateSupervisorTask, RATE_SUPERVISOR_TASK_STACKSIZE);
 
 static void stabilizerTask(void* param);
+static void rateSupervisorTask(void* param);
 
 static void calcSensorToOutputLatency(const sensorData_t *sensorData)
 {
@@ -204,20 +205,12 @@ bool stabilizerTest(void)
   return pass;
 }
 
-static void checkEmergencyStopTimeout()
-{
-  if (emergencyStopTimeout >= 0) {
-    emergencyStopTimeout -= 1;
-
-    if (emergencyStopTimeout == 0) {
-      emergencyStop = true;
-    }
-  }
-}
-
 static void batteryCompensation(const motors_thrust_uncapped_t* motorThrustUncapped, motors_thrust_uncapped_t* motorThrustBatCompUncapped)
 {
-  float supplyVoltage = pmGetBatteryVoltage();
+  // Low pass on the BatteryVoltage
+  float b = 0.01f; // 0.2f = Convergence (95%) in ~10 steps = ~20ms
+  static float supplyVoltage = 4.2;
+  supplyVoltage = supplyVoltage + b*(pmGetBatteryVoltage() - supplyVoltage);
 
   for (int motor = 0; motor < STABILIZER_NR_OF_MOTORS; motor++)
   {
@@ -231,6 +224,62 @@ static void setMotorRatios(const motors_thrust_pwm_t* motorPwm)
   motorsSetRatio(MOTOR_M2, motorPwm->motors.m2);
   motorsSetRatio(MOTOR_M3, motorPwm->motors.m3);
   motorsSetRatio(MOTOR_M4, motorPwm->motors.m4);
+}
+
+static void updateStateEstimatorAndControllerTypes() {
+  if (stateEstimatorGetType() != estimatorType) {
+    stateEstimatorSwitchTo(estimatorType);
+    estimatorType = stateEstimatorGetType();
+  }
+
+  if (controllerGetType() != controllerType) {
+    controllerInit(controllerType);
+    controllerType = controllerGetType();
+  }
+}
+
+static void logCapWarning(const bool isCapped) {
+  #ifdef CONFIG_LOG_MOTOR_CAP_WARNING
+  static uint32_t nextReportTick = 0;
+
+  if (isCapped) {
+    uint32_t now = xTaskGetTickCount();
+    if (now > nextReportTick) {
+      DEBUG_PRINT("Warning: motor thrust saturated\n");
+      nextReportTick = now + M2T(3000);
+    }
+  }
+  #endif
+}
+
+static void controlMotors(const control_t* control) {
+  powerDistribution(control, &motorThrustUncapped);
+  batteryCompensation(&motorThrustUncapped, &motorThrustBatCompUncapped);
+  const bool isCapped = powerDistributionCap(&motorThrustBatCompUncapped, &motorPwm);
+  logCapWarning(isCapped);
+  setMotorRatios(&motorPwm);
+}
+
+void rateSupervisorTask(void *pvParameters) {
+  while (1) {
+    // Wait for the semaphore to be given by the stabilizerTask
+    if (xSemaphoreTake(xRateSupervisorSemaphore, M2T(2000)) == pdTRUE) {
+      // Validate the rate
+      if (!rateSupervisorValidate(&rateSupervisorContext, xTaskGetTickCount())) {
+        if (!rateWarningDisplayed) {
+          DEBUG_PRINT("WARNING: stabilizer loop rate is off (%lu)\n", rateSupervisorLatestCount(&rateSupervisorContext));
+          rateWarningDisplayed = true;
+        }
+      }
+    } else {
+      // Don't assert if sensors are suspended
+      if (isSensorsSuspended() == false) {
+        // Handle the case where the semaphore was not given within the timeout
+        DEBUG_PRINT("ERROR: stabilizerTask is blocking\n");
+        ASSERT(false);  // For safety, assert if the stabilizer task is blocking to ensure motor shutdown
+      }
+    }
+  }
 }
 
 /* The stabilizer loop runs at 1kHz. It is the
@@ -256,9 +305,14 @@ static void stabilizerTask(void* param)
   // Initialize stabilizerStep to something else than 0
   stabilizerStep = 1;
 
+  DEBUG_PRINT("Starting stabilizer loop\n");
   rateSupervisorInit(&rateSupervisorContext, xTaskGetTickCount(), M2T(1000), 997, 1003, 1);
+  xRateSupervisorSemaphore = xSemaphoreCreateBinary();
+  STATIC_MEM_TASK_CREATE(rateSupervisorTask, rateSupervisorTask, RATE_SUPERVISOR_TASK_NAME, NULL, RATE_SUPERVISOR_TASK_PRI);
 
-  DEBUG_PRINT("Ready to fly.\n");
+  motorsResetESCs();
+  // Sync to the first sensor data ready interrupt to ensure correct timing from the start of the loop
+  sensorsWaitDataReady(); 
 
   while(1) {
     // The sensor should unlock at 1kHz
@@ -270,47 +324,51 @@ static void stabilizerTask(void* param)
     if (healthShallWeRunTest()) {
       healthRunTests(&sensorData);
     } else {
-      // allow to update estimator dynamically
-      if (stateEstimatorGetType() != estimatorType) {
-        stateEstimatorSwitchTo(estimatorType);
-        estimatorType = stateEstimatorGetType();
-      }
-      // allow to update controller dynamically
-      if (controllerGetType() != controllerType) {
-        controllerInit(controllerType);
-        controllerType = controllerGetType();
-      }
+      updateStateEstimatorAndControllerTypes();
 
       stateEstimator(&state, stabilizerStep);
-      compressState();
 
-      if (crtpCommanderHighLevelGetSetpoint(&tempSetpoint, &state, stabilizerStep)) {
+      // Critical for safety, be careful if you modify this code!
+      const bool canFly = supervisorCanFly();
+      crtpCommanderBlock(!canFly);
+
+      if (canFly && crtpCommanderHighLevelGetSetpoint(&tempSetpoint, &state, stabilizerStep)) {
         commanderSetSetpoint(&tempSetpoint, COMMANDER_PRIORITY_HIGHLEVEL);
       }
-
       commanderGetSetpoint(&setpoint, &state);
-      compressSetpoint();
 
+      if (!canFly) {
+        // Keep commander state fresh, but do not execute flight setpoints when flying is not allowed.
+        setpoint = (setpoint_t){0};
+      }
+
+      // Critical for safety, be careful if you modify this code!
+      // Let the supervisor update it's view of the current situation
+      supervisorUpdate(&sensorData, &setpoint, stabilizerStep);
+
+      // Let the collision avoidance module modify the setpoint, if needed
       collisionAvoidanceUpdateSetpoint(&setpoint, &sensorData, &state, stabilizerStep);
+
+      // Critical for safety, be careful if you modify this code!
+      // Let the supervisor modify the setpoint to handle exceptional conditions
+      supervisorOverrideSetpoint(&setpoint);
 
       controller(&control, &setpoint, &sensorData, &state, stabilizerStep);
 
-      checkEmergencyStopTimeout();
-
-      //
-      // The supervisor module keeps track of Crazyflie state such as if
-      // we are ok to fly, or if the Crazyflie is in flight.
-      //
-      supervisorUpdate(&sensorData);
-
-      if (emergencyStop || (systemIsArmed() == false)) {
-        motorsStop();
+      // Critical for safety, be careful if you modify this code!
+      // The supervisor will already set thrust to 0 in the setpoint if needed, but to be extra sure prevent motors from running.
+      if (supervisorAreMotorsAllowedToRun()) {
+        controlMotors(&control);
+#ifdef CONFIG_MOTORS_ESC_PROTOCOL_DSHOT
+        motorsBurstDshot();
+#endif
       } else {
-        powerDistribution(&control, &motorThrustUncapped);
-        batteryCompensation(&motorThrustUncapped, &motorThrustBatCompUncapped);
-        powerDistributionCap(&motorThrustBatCompUncapped, &motorPwm);
-        setMotorRatios(&motorPwm);
+        motorsStop();
       }
+
+      // Compute compressed log formats
+      compressState();
+      compressSetpoint();
 
 #ifdef CONFIG_DECK_USD
       // Log data to uSD card if configured
@@ -323,39 +381,15 @@ static void stabilizerTask(void* param)
       calcSensorToOutputLatency(&sensorData);
       stabilizerStep++;
       STATS_CNT_RATE_EVENT(&stabilizerRate);
-
-      if (!rateSupervisorValidate(&rateSupervisorContext, xTaskGetTickCount())) {
-        if (!rateWarningDisplayed) {
-          DEBUG_PRINT("WARNING: stabilizer loop rate is off (%lu)\n", rateSupervisorLatestCount(&rateSupervisorContext));
-          rateWarningDisplayed = true;
-        }
-      }
     }
-#ifdef CONFIG_MOTORS_ESC_PROTOCOL_DSHOT
-    motorsBurstDshot();
-#endif
+
+    xSemaphoreGive(xRateSupervisorSemaphore);
   }
-}
-
-void stabilizerSetEmergencyStop()
-{
-  emergencyStop = true;
-}
-
-void stabilizerResetEmergencyStop()
-{
-  emergencyStop = false;
-}
-
-void stabilizerSetEmergencyStopTimeout(int timeout)
-{
-  emergencyStop = false;
-  emergencyStopTimeout = timeout;
 }
 
 /**
  * Parameters to set the estimator and controller type
- * for the stabilizer module, or to do an emergency stop
+ * for the stabilizer module
  */
 PARAM_GROUP_START(stabilizer)
 /**
@@ -365,13 +399,10 @@ PARAM_GROUP_START(stabilizer)
  */
 PARAM_ADD_CORE(PARAM_UINT8, estimator, &estimatorType)
 /**
- * @brief Controller type Auto select(0), PID(1), Mellinger(2), INDI(3), Brescianini(4) (Default: 0)
+ * @brief Controller type Auto select(0), PID(1), Mellinger(2), INDI(3), Brescianini(4), Lee(5) (Default: 0)
  */
 PARAM_ADD_CORE(PARAM_UINT8, controller, &controllerType)
-/**
- * @brief If set to nonzero will turn off power
- */
-PARAM_ADD_CORE(PARAM_UINT8, stop, &emergencyStop)
+
 PARAM_GROUP_STOP(stabilizer)
 
 
@@ -441,6 +472,46 @@ LOG_ADD_CORE(LOG_FLOAT, pitch, &setpoint.attitude.pitch)
  * @brief Desired attitude rate, yaw rate [deg/s]
  */
 LOG_ADD_CORE(LOG_FLOAT, yaw, &setpoint.attitudeRate.yaw)
+
+/**
+ * @brief Desired thrust
+ */
+LOG_ADD_CORE(LOG_FLOAT, thrust, &setpoint.thrust)
+
+/**
+ * @brief Controller setpoint.mode.x (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_x, &setpoint.mode.x)
+
+/**
+ * @brief Controller setpoint.mode.y (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_y, &setpoint.mode.y)
+
+/**
+ * @brief Controller setpoint.mode.z (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_z, &setpoint.mode.z)
+
+/**
+ * @brief Controller setpoint.mode.roll (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_roll, &setpoint.mode.roll)
+
+/**
+ * @brief Controller setpoint.mode.pitch (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_pitch, &setpoint.mode.pitch)
+
+/**
+ * @brief Controller setpoint.mode.yaw (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_yaw, &setpoint.mode.yaw)
+
+/**
+ * @brief Controller setpoint.mode.quat (modeDisable = 0, modeAbs = 1, modeVelocity = 2)
+ */
+LOG_ADD(LOG_UINT8, mode_quat, &setpoint.mode.quat)
 LOG_GROUP_STOP(ctrltarget)
 
 /**

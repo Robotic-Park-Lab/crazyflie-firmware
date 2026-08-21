@@ -55,10 +55,18 @@ static lpsTdoa2AlgoOptions_t defaultOptions = {
      0xbccf000000000001,
      0xbccf000000000002,
      0xbccf000000000003,
+#if LOCODECK_NR_OF_TDOA2_ANCHORS > 4
      0xbccf000000000004,
+#endif
+#if LOCODECK_NR_OF_TDOA2_ANCHORS > 5
      0xbccf000000000005,
+#endif
+#if LOCODECK_NR_OF_TDOA2_ANCHORS > 6
      0xbccf000000000006,
+#endif
+#if LOCODECK_NR_OF_TDOA2_ANCHORS > 7
      0xbccf000000000007,
+#endif
    },
 };
 
@@ -116,7 +124,7 @@ static void updateRemoteData(tdoaAnchorContext_t* anchorCtx, const rangePacket2_
       if (hasDistance) {
         int64_t tof = packet->distances[i];
         if (isValidTimeStamp(tof)) {
-          tdoaStorageSetTimeOfFlight(anchorCtx, remoteId, tof);
+          tdoaStorageSetRemoteTimeOfFlight(anchorCtx, remoteId, tof);
 
           if (isConsecutiveIds(previousAnchor, anchorId)) {
             logAnchorDistance[anchorId] = packet->distances[previousAnchor];
@@ -280,15 +288,17 @@ static void sendTdoaToEstimatorCallback(tdoaMeasurement_t* tdoaMeasurement) {
   // Override the default standard deviation set by the TDoA engine.
   tdoaMeasurement->stdDev = stdDev;
 
-  estimatorEnqueueTDOA(tdoaMeasurement);
+  if (locoEnableEstimator) {
+    estimatorEnqueueTDOA(tdoaMeasurement);
 
-  #ifdef CONFIG_DECK_LOCO_2D_POSITION
-  heightMeasurement_t heightData;
-  heightData.timestamp = xTaskGetTickCount();
-  heightData.height = DECK_LOCO_2D_POSITION_HEIGHT;
-  heightData.stdDev = 0.0001;
-  estimatorEnqueueAbsoluteHeight(&heightData);
-  #endif
+    #ifdef CONFIG_DECK_LOCO_2D_POSITION
+    heightMeasurement_t heightData;
+    heightData.timestamp = xTaskGetTickCount();
+    heightData.height = DECK_LOCO_2D_POSITION_HEIGHT;
+    heightData.stdDev = 0.0001;
+    estimatorEnqueueAbsoluteHeight(&heightData);
+    #endif
+  }
 
   const uint8_t idA = tdoaMeasurement->anchorIds[0];
   const uint8_t idB = tdoaMeasurement->anchorIds[1];

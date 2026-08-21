@@ -21,6 +21,8 @@ The first byte describes the command:
 | value | Command |
 |-------|---------|
 | 0     | [Set continuous wave](#set-continuous-wave) |
+| 1     | Request arm/disarm the system *(deprecated, use [supervisor port](crtp_supervisor.md#armdisarm-system))* |
+| 2     | Recover system *(deprecated, use [supervisor port](crtp_supervisor.md#recover-system))* |
 
 ### Set continuous wave
 
@@ -28,7 +30,7 @@ Command and answer:
 
 | Byte | Description |
 |------|-------------|
-| 0    | setContinuousWave (0) |
+| 0    | command setContinuousWave (0) |
 | 1    | Enable |
 
 If enable is not 0, the Crazyflie radio will start transmitting a continuous sine wave at the currently setup
@@ -103,12 +105,13 @@ Answer:
 
 Returns a string representation of the device type the firmware is running on. The currently existing device types are:
 
-| Device Type | Device type name |
-|-------------|------------------|
-| RZ10        | Crazyflie Bolt    |
-| CF20        | Crazyflie 2.0    |
-| CF2.1       | Crazyflie 2.1    |
-| RR10        | Roadrunner 1.0   |
+| Device Type | Device type name        |
+|-------------|-------------------------|
+| RZ10        | Crazyflie Bolt          |
+| CF20        | Crazyflie 2.0           |
+| CF2.1       | Crazyflie 2.1           |
+| C21B        | Crazyflie 2.1 Brushless |
+| RR10        | Roadrunner 1.0          |
 
 ## App channel
 

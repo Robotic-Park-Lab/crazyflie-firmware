@@ -65,6 +65,7 @@ typedef struct vec3_s vector_t;
 typedef struct vec3_s point_t;
 typedef struct vec3_s velocity_t;
 typedef struct vec3_s acc_t;
+typedef struct vec3_s jerk_t;
 
 /* Orientation as a quaternion */
 typedef struct quaternion_s {
@@ -247,6 +248,16 @@ typedef enum mode_e {
   modeVelocity
 } stab_mode_t;
 
+typedef struct {
+  stab_mode_t x;
+  stab_mode_t y;
+  stab_mode_t z;
+  stab_mode_t roll;
+  stab_mode_t pitch;
+  stab_mode_t yaw;
+  stab_mode_t quat;
+} setpoint_mode_t;
+
 typedef struct setpoint_s {
   uint32_t timestamp;
 
@@ -257,17 +268,10 @@ typedef struct setpoint_s {
   point_t position;         // m
   velocity_t velocity;      // m/s
   acc_t acceleration;       // m/s^2
+  jerk_t jerk;              // m/s^3
   bool velocity_body;       // true if velocity is given in body frame; false if velocity is given in world frame
 
-  struct {
-    stab_mode_t x;
-    stab_mode_t y;
-    stab_mode_t z;
-    stab_mode_t roll;
-    stab_mode_t pitch;
-    stab_mode_t yaw;
-    stab_mode_t quat;
-  } mode;
+  setpoint_mode_t mode;
 } setpoint_t;
 
 /** Estimate of position */
@@ -356,7 +360,7 @@ typedef struct
 } barometerMeasurement_t;
 
 
-// Frequencies to bo used with the RATE_DO_EXECUTE_HZ macro. Do NOT use an arbitrary number.
+// Frequencies to be used with the RATE_DO_EXECUTE_HZ macro. Do NOT use an arbitrary number.
 #define RATE_1000_HZ 1000
 #define RATE_500_HZ 500
 #define RATE_250_HZ 250
@@ -368,6 +372,7 @@ typedef struct
 #define ATTITUDE_RATE RATE_500_HZ
 #define POSITION_RATE RATE_100_HZ
 #define RATE_HL_COMMANDER RATE_100_HZ
+#define RATE_SUPERVISOR RATE_25_HZ
 
 #define RATE_DO_EXECUTE(RATE_HZ, TICK) ((TICK % (RATE_MAIN_LOOP / RATE_HZ)) == 0)
 
